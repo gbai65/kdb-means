@@ -172,7 +172,7 @@ def main():
     global PLOT, DIR, iter, plotNum, silPlotNum
     for iter in range(25):
         plotNum, silPlotNum = 0, 0
-        DIR = f"data/trial{iter}/"
+        DIR = f"data/trial{iter:02d}/"
         try:
             for ea in ["plots", "stats", "stats/rand", "stats/MI", "stats/sil", "stats/steps"]:
                 os.makedirs(DIR+ea, exist_ok=True)
@@ -180,7 +180,7 @@ def main():
 
         numSamples = random.randint(100, 500)
         k = random.randint(3, 10)
-        if numSamples<400 or k<7: PLOT=False
+        if numSamples<400 or k<7: PLOT=False #only nice looking samples
         else: PLOT = True
         with open(f"{DIR}info", "a") as file:
             file.write(f"N: {numSamples}, k: {k}")
