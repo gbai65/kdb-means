@@ -5,21 +5,21 @@ from sklearn.datasets import make_blobs
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 from scipy.spatial.distance import cdist, pdist
-from sklearn.metrics import silhouette_score, silhouette_samples
+from sklearn.metrics import silhouette_score, silhouette_samples, adjusted_mutual_info_score, adjusted_rand_score
 import time
-from sklearn.metrics import adjusted_mutual_info_score, adjusted_rand_score
 import os, random
+from sklearn.neighbors import NearestNeighbors
 
 #note: delete the data directory each time you run this
 
 starttime = time.time()
-plotNum= 0; silPlotNum = 0
-PLOT = True; DIR=''; iter=0
+plotNum= 0; silPlotNum = 0; iter=0
+PLOT = True; DIR=''; DATASETTYPE = 'real'
 
-def dbkMeans(inputs, k):
+def KDBMeans(inputs, k):
     r0 = calculateR0(inputs)
-    distMatrix = cdist(inputs, inputs, metric = "euclidean")
-    localDensities = np.maximum(calculateLocalDensity(inputs, distMatrix, r0), 1e-10)
+    localDensities = np.maximum(calculateLocalDensity(inputs, r0), 1e-10)
+    distMatrix = cdist(inputs, inputs)
     selectedCentroidsIxs = selectCentroids(localDensities, distMatrix, k)
     selectedCentroidsPos = [list(inputs[ix]) for ix in selectedCentroidsIxs]
     selectedCentroidsPos = np.array(selectedCentroidsPos, dtype=np.float64)
@@ -43,9 +43,11 @@ def selectCentroids(localDensities, distMatrix, k): #density-based k-means++
         centroidIxs.append(np.argmax(localDensities*minDistCentroid**2))
     return centroidIxs
 
-def calculateLocalDensity(inputs, distanceMatrix, r0):
-    densities = np.sum(distanceMatrix<= r0, axis=1) #use axis to sum for each indiv. point
-    return densities
+def calculateLocalDensity(inputs, r0):
+    nn = NearestNeighbors(radius=r0)
+    nn.fit(inputs)
+    neighbors = nn.radius_neighbors(inputs, return_distance=False) #fix this ?
+    return np.array([len(n) for n in neighbors])
 
 def calculateR0(inputs): #based on data spread
     numSamples = len(inputs)
@@ -88,11 +90,11 @@ def plot(inputs, centroids, labels, k): #make a pretty looking plot
     plt.scatter(centroids[:, 0], centroids[:, 1], color="black", marker="X", s=200, label="Centroid", linewidths=2)
     plt.xlabel("Attribute 1")
     plt.ylabel("Attribute 2")
-    plt.title(f"Clustering Results: {['DBK-Means Initial Centroids', 'DBK-Means Final Clusters', 'K-Means Initial Centroids', 'K-Means Final Centroids', 'K-Means++ Initial Centroids', 'K-Means++ Final Centroids'][plotNum]}")
+    plt.title(f"Clustering Results: {['KDB-Means Initial Centroids', 'KDB-Means Final Clusters', 'K-Means Initial Centroids', 'K-Means Final Centroids', 'K-Means++ Initial Centroids', 'K-Means++ Final Centroids'][plotNum]}")
     plt.legend(loc="lower right")
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(f"{DIR}plots/z{['DBK-Means', 'KMeans', 'KMeans++'][silPlotNum]}{plotNum}.png")
+    plt.savefig(f"{DIR}plots/z{['KDB-Means', 'KMeans', 'KMeans++'][silPlotNum]}{plotNum}.png")
     plt.close()
     plotNum+=1
 
@@ -113,23 +115,22 @@ def silAnalysis(inputs, model):
         plt.axvline(avgSil, linestyle="--", color="red")
         plt.xlabel("Silhouette Score")
         plt.ylabel("Clusters")
-        plt.title(f"Silhouette Graph: {['DBK-Means', 'KMeans', 'KMeans++'][silPlotNum]}")
+        plt.title(f"Silhouette Graph: {['KDB-Means', 'KMeans', 'KMeans++'][silPlotNum]}")
         plt.tight_layout()
         plt.savefig(f"{DIR}plots/silPlot{silPlotNum}.png")
         plt.close()
 
     silPlotNum+=1
 
-
-def finAnalysis(inputs, targets, DBKmodel, KMeansmodel, KMeansPPmodel):
+def finAnalysis(inputs, targets, KDBmodel, KMeansmodel, KMeansPPmodel):
     for metric in range(4):
-        for ix, model in enumerate([DBKmodel, KMeansmodel, KMeansPPmodel]):
+        for ix, model in enumerate([KDBmodel, KMeansmodel, KMeansPPmodel]):
             theseLabels = model.labels_
             if not metric: thisMetric = (adjusted_rand_score(targets, theseLabels))
             if metric==1: thisMetric = (adjusted_mutual_info_score(targets, theseLabels))
             if metric==2: thisMetric = (silhouette_score(inputs, theseLabels))
             if metric==3: thisMetric = (model.n_iter_)
-            with open(f"{DIR}stats/{['rand', 'MI', 'sil', 'steps'][metric]}/{['DBK', 'KM', 'KMPP'][ix]}", "a") as file: #keep appending to file instead of overwriting to collect data across runs
+            with open(f"{DIR}stats/{['rand', 'MI', 'sil', 'steps'][metric]}/{['KDB', 'KM', 'KMPP'][ix]}", "a") as file: #keep appending to file instead of overwriting to collect data across runs
                 file.write(str(thisMetric) +"\n")
 
 def makeBlobs(numSamples, k):
@@ -148,16 +149,23 @@ def makeBlobs(numSamples, k):
         plt.savefig(f'{DIR}plots/originalPlot.png')
         plt.close()
 
-def comparison(k):
-    trainingData = pd.read_csv(f"{DIR}skewedData.csv")
-    targets = trainingData["label"]
-    trainingData = trainingData.drop(columns=["label"])
-    trainingData = trainingData.values
+def runModels(k):
+    if DATASETTYPE!="toy": 
+        from ucimlrepo import fetch_ucirepo 
+        dataset = fetch_ucirepo(id=257) 
+        
+        trainingData = dataset.data.features.values
+        targets = np.array([{"Very Low": 0, "very_low": 0, "Low": 1, "Middle": 2, "High": 3}[key] for key in dataset.data.targets.values.ravel()])
+    else: 
+        trainingData = pd.read_csv(f"{DIR}skewedData.csv")
+        targets = trainingData["label"]
+        trainingData = trainingData.drop(columns=["label"])
+        trainingData = trainingData.values
     trainingData = normalizeFeatures(trainingData)[0]
-    print(f"DBKMeans commencing; {round(time.time()-starttime, 3)}s elapsed")
-    DBKmodel  = dbkMeans(trainingData, k)
-    print(f"DBKMeans finished; {round(time.time()-starttime, 3)}s elapsed")
-    silAnalysis(trainingData, DBKmodel)
+    print(f"KDBMeans commencing; {round(time.time()-starttime, 3)}s elapsed")
+    KDBmodel  = KDBMeans(trainingData, k)
+    print(f"KDBMeans finished; {round(time.time()-starttime, 3)}s elapsed")
+    silAnalysis(trainingData, KDBmodel)
     print(f"KMeans commencing; {round(time.time()-starttime, 3)}s elapsed")
     KMeansmodel  = normalKMeans(trainingData, k)
     print(f"KMeans finished; {round(time.time()-starttime, 3)}s elapsed")
@@ -166,23 +174,31 @@ def comparison(k):
     KMeansPPmodel = kMeansPP(trainingData, k)
     print(f"KMeans++ finished; {round(time.time()-starttime, 3)}s elapsed")
     silAnalysis(trainingData, KMeansPPmodel)
-    finAnalysis(trainingData, targets, DBKmodel, KMeansmodel, KMeansPPmodel)
+    finAnalysis(trainingData, targets, KDBmodel, KMeansmodel, KMeansPPmodel)
 
 def main():
-    global PLOT, DIR, iter, plotNum, silPlotNum
-    for iter in range(25):
-        plotNum, silPlotNum = 0, 0
-        DIR = f"data/trial{iter:02d}/"
+    global PLOT, DIR, iter, plotNum, silPlotNum, DATASETTYPE
+    if DATASETTYPE == "toy":
+        for iter in range(25):
+            plotNum, silPlotNum = 0, 0
+            DIR = f"data/trial{iter:02d}/"
+            try:
+                for ea in ["plots", "stats", "stats/rand", "stats/MI", "stats/sil", "stats/steps"]:
+                    os.makedirs(DIR+ea, exist_ok=True)
+            except OSError as e: print(f"Error: {e}")
+
+            numSamples = random.randint(100, 500)
+            k = random.randint(3, 10)
+            if iter>10: PLOT=False
+            with open(f"{DIR}info", "a") as file:
+                file.write(f"N: {numSamples}, k: {k}")
+            makeBlobs(numSamples, k)
+            runModels( k)
+    else: 
+        DIR = "knowledge/"
         try:
             for ea in ["plots", "stats", "stats/rand", "stats/MI", "stats/sil", "stats/steps"]:
                 os.makedirs(DIR+ea, exist_ok=True)
         except OSError as e: print(f"Error: {e}")
-
-        numSamples = random.randint(100, 500)
-        k = random.randint(3, 10)
-        if iter>10: PLOT=False
-        with open(f"{DIR}info", "a") as file:
-            file.write(f"N: {numSamples}, k: {k}")
-        makeBlobs(numSamples, k)
-        comparison(k)
+        runModels(4) #we're assuming we already know k from the dataset itself for the purposes of this algorithm
 main()
